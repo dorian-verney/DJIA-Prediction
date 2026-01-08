@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
+FUSION_DATA_DIR = DATA_DIR / "fusion"
 
 MODELS_DIR = PROJECT_ROOT / "models"
 
@@ -22,6 +23,8 @@ if not os.path.exists(RAW_DATA_DIR):
     os.makedirs(RAW_DATA_DIR)
 if not os.path.exists(PROCESSED_DATA_DIR):
     os.makedirs(PROCESSED_DATA_DIR)
+if not os.path.exists(FUSION_DATA_DIR):
+    os.makedirs(FUSION_DATA_DIR)
 
 if not os.path.exists(MODELS_DIR):
     os.makedirs(MODELS_DIR)
@@ -29,7 +32,8 @@ if not os.path.exists(MODELS_DIR):
 if not os.path.exists(RESULTS_DIR):
     os.makedirs(RESULTS_DIR)
 
-# Optional: Verify it works when you run this file directly
+
 if __name__ == "__main__":
     print(f"Project Root: {PROJECT_ROOT}")
     print(f"Data Dir:     {DATA_DIR}")
+

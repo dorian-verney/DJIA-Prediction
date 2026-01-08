@@ -4,24 +4,24 @@ from pathlib import Path
 
 
 from src.experiments.run_experiments import run_experiments
-config_base = Path(__file__).resolve().parent / "configs" / "models"
+config_base = Path(__file__).resolve().parent / "models"
 
-def _available_models_by_library() -> dict[str, list[str]]:
-    libraries = ["sklearn", "torch"]
+def _available_models_by_data_type() -> dict[str, list[str]]:
+    data_types = ["numerical", "textual"]
     result: dict[str, list[str]] = {}
-    for lib in libraries:
-        lib_dir = config_base / lib
-        if lib_dir.exists():
-            result[lib] = sorted(p.stem for p in lib_dir.glob("*.yaml"))
+    for dtype in data_types:
+        dtype_dir = config_base / dtype
+        if dtype_dir.exists():
+            result[dtype] = sorted(p.stem for p in dtype_dir.glob("*.yaml"))
         else:
-            result[lib] = []
-    return result
+            result[dtype] = []
+    return result   
 
 
-AVAILABLE_MODELS = _available_models_by_library()
+AVAILABLE_MODELS = _available_models_by_data_type()
 AVAILABLE_MODELS_HELP = "\n".join(
-    f"  {lib}: {', '.join(models) if models else 'none'}"
-    for lib, models in AVAILABLE_MODELS.items()
+    f"  {dtype}: {', '.join(models) if models else 'none'}"
+    for dtype, models in AVAILABLE_MODELS.items()
 )
 
 parser = ArgumentParser(
@@ -33,38 +33,31 @@ parser.add_argument(
     "--model",
     type=str,
     required=False,
-    help=f"Model name. Available per library:\n{AVAILABLE_MODELS_HELP}",
+    help=f"Model name. Available per data type:\n{AVAILABLE_MODELS_HELP}",
 )
 parser.add_argument(
-    "-lib",
-    "--library",
+    "-dtype",
+    "--data_type",
     type=str,
-    choices=["sklearn", "torch"],
+    choices=["numerical", "textual"],
     required=True,
-    help="ML library backend.",
-)
-parser.add_argument(
-    "-d",
-    "--dataset",
-    type=str,
-    required=False,
-    help="Dataset identifier (optional).",
+    help="Data type.",
 )
 
 
 args = parser.parse_args()
 
 if __name__ == "__main__":
-    available_for_library = AVAILABLE_MODELS.get(args.library, [])
-    if args.model and args.model not in available_for_library:
+    available_for_dtype = AVAILABLE_MODELS.get(args.data_type, [])
+    if args.model and args.model not in available_for_dtype:
         parser.error(
-            f"Unknown model '{args.model}' for library '{args.library}'. "
-            f"Available: {', '.join(available_for_library)}"
+            f"Unknown model '{args.model}' for data type '{args.data_type}'. "
+            f"Available: {', '.join(available_for_dtype)}"
         )
   
-    config_path = config_base / args.library / f"{args.model}.yaml" 
-    if args.library:
-        config_path = config_base / args.library
+    config_path = config_base / args.data_type / f"{args.model}.yaml" 
+    if args.data_type:
+        config_path = config_base / args.data_type
         if args.model:
             config_path = config_path / f"{args.model}.yaml"
 
@@ -74,5 +67,5 @@ if __name__ == "__main__":
 
     print("---------- Running experiments ----------")
 
-    run_experiments(config_path, args.library)
+    run_experiments(config_path)
     print("\n---------- Experiments finished ----------\n")

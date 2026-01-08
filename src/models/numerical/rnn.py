@@ -5,9 +5,8 @@ class SimpleRNN(nn.Module):
         """
         Initialize the SimpleRNN model.
         Args:
-            input_size (int): The number of input features per timestep.
-            hidden_size (int): The number of features in the hidden state.
-            output_size (int): The number of output features (n_features).
+            hidden_size (int): The number of features in the hidden state
+            output_size (int): The number of output features (n_features)
         """
         super(SimpleRNN, self).__init__()
         self.lstm = nn.LSTM(**config, batch_first=True)
@@ -27,4 +26,4 @@ class SimpleRNN(nn.Module):
 
 
 def create_rnn(config):
-    return SimpleLSTM(**config)
+    return SimpleRNN(**config)

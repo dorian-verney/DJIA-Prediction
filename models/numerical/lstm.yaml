@@ -1,7 +1,6 @@
 model: LSTM
-
-epochs: 5
-trainer: Trainer
+library: torch
+epochs: 1
 search_space:
   model:
     lstm:
@@ -19,13 +18,14 @@ search_space:
       lr: [0.0005, 0.001, 0.005]
     lr_scheduler: [ReduceLROnPlateau]
     lr_scheduler_args:
-    # criterion: [BCEWithLogitsLoss]
-    # device: [cpu]
-    # batch_size: [16, 32, 64]
+    batch_size: [16, 32, 64]
+    ds_type: TimeSeriesDataset
 
-search:
+search_args:
   type: random
-  n_trials: 2
+  n_trials: 4
 
 
-dataset: "data_test.csv" # be careful, it is a relative path to the root of the project
+dataset: 
+  name: "data_price.csv" # be careful, it is a relative path to the root of the project
+  class: numerical

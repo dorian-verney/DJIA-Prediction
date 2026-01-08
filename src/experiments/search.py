@@ -1,107 +1,114 @@
-from torch.nn import BCEWithLogitsLoss
+from torch.nn import BCEWithLogitsLoss, Module
 import torch.optim as optim
 from sklearn.model_selection import train_test_split
-from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
+from sklearn.model_selection import RandomizedSearchCV
 import numpy as np
-
+from sklearn.base import BaseEstimator
 from src.training.evaluator import TorchEvaluator
-from src.utils.utils import sample_nested_config
+from src.utils.utils import sample_config
 from src.models.model_registry import MODEL_REGISTRY
 from src.training.trainer import Trainer
-from src.data.data_loader import TimeSeriesDataset
+from src.data.data_loader import to_dataloader
 
-
-
-def search(config, datasets, trainer_library):
-    match trainer_library:
+def search(
+    config: dict, datasets: tuple[np.ndarray, np.ndarray]
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Choose and call the search method according to the model library
+    """
+    lib = config["library"] 
+    match lib:
         case "sklearn":
             best_model = search_sklearn(config, datasets)
         case "torch":
             best_model = search_torch(config, datasets)
         case _:
-            raise ValueError(f"Trainer library {trainer_library} not supported")
+            raise ValueError(f"Library {lib} not supported")
     
     return best_model
 
-def search_torch(config, datasets):
-    n_trials = config["search"]["n_trials"]
+
+def search_torch(
+    config: dict, datasets: tuple[np.ndarray, np.ndarray]
+) -> tuple[Module, dict]:
+    """
+    Search the best model among torch configs, evaluate and save it.
+    """
+    n_trials = config["search_args"]["n_trials"]
     search_space = config["search_space"]
 
+    X_train, y_train = datasets
+    X_train, X_valid, y_train, y_valid = train_test_split(X_train, 
+                                                          y_train, 
+                                                          test_size=0.1, 
+                                                          shuffle=False)
 
-    # ONLY for TIME SERIES DATASETS
-    (X_train, y_train), (X_test, y_test) = datasets
-    X_train, X_valid, y_train, y_valid = train_test_split(X_train, y_train, test_size=0.2, shuffle=False)
+    evaluator = TorchEvaluator(device="cpu")
 
-    lookback =  54
-    lookahead = 1
-    
-    train_dataset = TimeSeriesDataset(X_train, lookback, lookahead, target=y_train)
-    valid_dataset = TimeSeriesDataset(X_valid, lookback, lookahead, target=y_valid)
-
-    train_dataloader = train_dataset.to_dataloader(shuffle=False)
-    valid_dataloader = valid_dataset.to_dataloader(shuffle=False)
-    datasets = (train_dataloader, valid_dataloader)
-    
-    evaluator = TorchEvaluator(valid_dataloader, device="cpu")
-    
-
-    for i in range(n_trials):
+    for _ in range(n_trials):
 
         # sample a configuration - recursively sample while preserving structure
-        model_cfg = sample_nested_config(search_space["model"])
-        training_cfg = sample_nested_config(search_space["training"])
+        model_cfg = sample_config(search_space["model"])
+        training_cfg = sample_config(search_space["training"])
 
-        # create model
-        model = MODEL_REGISTRY[config["model"]](model_cfg)
+        # Get model class and instantiate it
+        model = MODEL_REGISTRY[config["model"]](**(model_cfg or {}))
         
-        # train
-        # Convert optimizer string to actual optimizer class
-        optimizer_class = getattr(optim, training_cfg["optimizer"])
-        optimizer = optimizer_class(model.parameters(), **training_cfg["optimizer_args"] if training_cfg["optimizer_args"] else {})
-        
-        scheduler_class = getattr(optim.lr_scheduler, training_cfg["lr_scheduler"])
-        scheduler = scheduler_class(optimizer, **training_cfg["lr_scheduler_args"] if training_cfg["lr_scheduler_args"] else {})
+        # Get optimizer class and instantiate it
+        optimizer = getattr(optim, training_cfg["optimizer"])(
+            model.parameters(), **training_cfg["optimizer_args"] or {}
+        )
+        # Get scheduler class and instantiate it
+        scheduler = getattr(optim.lr_scheduler, training_cfg["lr_scheduler"])(
+            optimizer, **training_cfg["lr_scheduler_args"] or {}
+        )
+
+        train_loader = to_dataloader(X_train, y_train, training_cfg)
+        valid_loader = to_dataloader(X_valid, y_valid, training_cfg)
 
         trainer = Trainer(model=model, 
-                        data_loader=datasets, 
-                        device="cpu",
-                        optimizer=optimizer, 
-                        scheduler=scheduler,
-                        criterion=BCEWithLogitsLoss())
+                          train_loader=train_loader, 
+                          val_loader=valid_loader, 
+                          criterion=BCEWithLogitsLoss(),
+                          optimizer=optimizer, 
+                          scheduler=scheduler,
+                          device="cpu")
 
         trainer.train(epochs=config["epochs"])
 
         # evaluate
-        metrics = evaluator.evaluate(model=trainer.get_trained_model(), 
-                            cfg={"model": model_cfg, "training": training_cfg})
-        print("-------------------------------- \n")
+        metrics = evaluator.evaluate(
+            trainer.get_trained_model(), 
+            valid_loader,
+            cfg={"model": model_cfg, "training": training_cfg}
+        )
 
+        print("-------------------------------- \n")
+    
     return evaluator.best_model_params()
 
 
-def search_sklearn(config, datasets):
-    n_trials = config["search"]["n_trials"]
+def search_sklearn(
+    config: dict, datasets: tuple[np.ndarray, np.ndarray]
+) -> tuple[BaseEstimator, dict]:
+    """
+    Search the best model among sklearn configs, evaluate and save it.
+    """
+    n_trials = config["search_args"]["n_trials"]
     model = MODEL_REGISTRY[config["model"]](config["search_space"]) 
     model_cfg = config["search_space"]
 
     # distributions = dict(C=uniform(loc=0, scale=4),
     #                     penalty=['l2', 'l1'])
 
-    (X_train, y_train), (X_test, y_test) = datasets # return 
-    # Defensive sanitization to avoid native-level crashes in some sklearn estimators
-    X_train = np.asarray(X_train, dtype=np.float32)
-    y_train = np.asarray(y_train, dtype=np.float32).ravel()
+    X_train, y_train = datasets 
 
-    X_train = np.ascontiguousarray(X_train, dtype=np.float32)
-    y_train = np.ascontiguousarray(y_train, dtype=np.float32).ravel()
-
-    tscv = TimeSeriesSplit(n_splits=3)
-  
     clf = RandomizedSearchCV(
         model,
         model_cfg,
-        cv=tscv,
-        n_iter=n_trials
+        cv=3,
+        n_iter=n_trials, 
+        refit=True
     )
     search = clf.fit(X_train, y_train)
 

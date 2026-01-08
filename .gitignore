@@ -2,4 +2,6 @@
 
 data/
 
-todo.md
+src/models/hybrid_system/
+
+*.arrow*

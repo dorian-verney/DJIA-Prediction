@@ -1,13 +1,14 @@
 from torch import nn
 
 class SimpleLSTM(nn.Module):
-    def __init__(self, config):
+    def __init__(self, **config):
         """
         Initialize the SimpleLSTM model.
         Args:
-            config (dict): Configuration dictionary with nested structure:
-                - config["lstm"]: dict with LSTM parameters (input_size, hidden_size, num_layers, dropout)
-                - config["fc"]: dict with FC layer parameters (output_size)
+            - hidden_size (int): The number of features in the hidden state
+            - num_layers (int): The number of layers in the LSTM
+            - dropout (float): The dropout rate
+            - output_size (int): The number of output features (n_features)
         """
         super(SimpleLSTM, self).__init__()
         if config["lstm"]["num_layers"] == 1:
@@ -27,5 +28,5 @@ class SimpleLSTM(nn.Module):
         return out.unsqueeze(1)  # (batch, 1, output_size)
 
 
-def create_lstm(config):
-    return SimpleLSTM(config)
+def create_lstm(**config):
+    return SimpleLSTM(**config)

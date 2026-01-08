@@ -2,6 +2,12 @@ import torch
 import torch.nn as nn
 
 class TextAttentionNet(nn.Module):
+    """
+    Text Attention Network for textual data
+    Given the embedding computed from bert model, 
+    we apply a FC, positional weighting and classifier to aggregate 
+    the 25 news headlines into a single vector
+    """
     def __init__(self, embed_dim=768, hidden_dim=64):
         super(TextAttentionNet, self).__init__()
         # 1. Per-Headline Processor
@@ -43,17 +49,24 @@ class TextAttentionNet(nn.Module):
 
         # Calculate Fixed Positional Weights based on exp(-x/7)
         max_headlines = features.shape[1]
-        indices = torch.arange(max_headlines, device=features.device, dtype=torch.float32)
-        raw_positional_weights = torch.exp(-indices / 7.0)
+        indices = torch.arange(
+            max_headlines, device=features.device, dtype=torch.float32
+        )
+        raw_pos_weights = torch.exp(-indices / 7.0)
+
         # Normalize weights so they sum to 1
-        normalized_positional_weights = raw_positional_weights / raw_positional_weights.sum()
+        normalized_pos_weights = raw_pos_weights / raw_pos_weights.sum()
 
         # Reshape for broadcasting across batch and hidden dimensions
         # attn_weights_for_sum shape: (1, Max_Headlines, 1)
-        attn_weights_for_sum = normalized_positional_weights.unsqueeze(0).unsqueeze(-1)
+        attn_weights_for_sum = normalized_pos_weights.unsqueeze(0).unsqueeze(-1)
 
         # Weighted Sum: (Batch, Hidden)
         context_vector = torch.sum(features * attn_weights_for_sum, dim=1)
-
         # Final Probability
         return self.classifier(context_vector)
+
+
+def create_text_attention_net(**config):
+    return TextAttentionNet(**config)
+

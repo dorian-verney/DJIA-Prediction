@@ -1,113 +1,127 @@
-import torch
-from torch.nn import Sigmoid
-import numpy as np
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import DataLoader
+from torch import nn, Tensor
+from torch.optim import Optimizer
+from torch.optim import lr_scheduler
+
+from torch.nn import Module
 
 class Trainer:
-    def __init__(self, model, data_loader, criterion, 
-                    optimizer, device, scheduler=None) -> None:
-        """
-        A utility class for training, validating and testing a PyTorch model.
+    """
+    Utility class for training, validating and testing a PyTorch model
+    """
+    def __init__(
+        self, model: Module, train_loader: DataLoader, val_loader: DataLoader, 
+        criterion: nn, optimizer: Optimizer, device: str, 
+        scheduler: lr_scheduler = ReduceLROnPlateau) -> None:
+ 
+        self.model        = model
+        self.train_loader = train_loader
+        self.val_loader   = val_loader
+        self.criterion    = criterion
+        self.optimizer    = optimizer
+        self.device       = device
+        self.scheduler    = scheduler
 
-        Attributes:
-            model (nn.Module): The PyTorch model to train.
-            data_loader (DataLoader): The DataLoader for the training and validation data.
-            criterion (nn.Module): The loss function.
-            optimizer (Optimizer): The optimizer.
-            device (torch.device): The device to train on (e.g., 'cpu' or 'cuda' or 'mps').
-            scheduler (Scheduler): The scheduler.
-
-        Methods:
-            train(epochs, patience): Trains the model for a given number of epochs, with early stopping.
-
-        """
-        self.model = model
-        self.train_loader = data_loader[0]
-        self.val_loader = data_loader[1]
-        # self.test_loader = data_loader[2]
-        self.criterion = criterion
-        self.optimizer = optimizer
-        self.device = device
-        self.scheduler = scheduler
         self.model.to(device)
-        
-    def train(self, epochs, patience=3):
+
+    def calc_loss_batch(
+        self, input_batch: Tensor, target_batch: Tensor
+    ) -> Tensor:
+        """
+        Calculate the loss for a batch of data
+        """
+        input_batch = input_batch.to(self.device)
+        target_batch = target_batch.to(self.device)
+        logits = self.model(input_batch)
+        loss = self.criterion(logits, target_batch)
+        return loss
+
+
+    def calc_loss_loader(
+        self, data_loader: DataLoader, num_batches: int | None = None
+    ) -> float:
+        """
+        Calculate the loss for a loader of data
+        """
+        total_loss = 0
+        if len(data_loader) == 0:
+            return float("nan")
+        elif num_batches is None:
+            num_batches = len(data_loader)
+        else:
+            num_batches = min(num_batches, len(data_loader))
+
+        for i, (input_batch, target_batch) in enumerate(data_loader):
+            if i < num_batches:
+                loss = self.calc_loss_batch(
+                    input_batch, target_batch
+                )
+                total_loss += (loss.item() * input_batch.size(0))
+            else:
+                break
+        return total_loss / num_batches
+
+
+    def train(
+        self, epochs: int, patience: int = 5
+    ) -> tuple[list[float], list[float], int]:
+        """
+        Train the model for a given number of epochs, with early stopping
+        """
         train_losses = []
-        train_maes = []
         val_losses = []
-        val_maes = []
+        val_loss_max = float('inf')
         patience_counter = 0
-        maes_max = 5e10
+        samples_seen = 0
         for epoch in range(epochs):
             # Training
             self.model.train()
-            running_loss = 0.0
-            running_mae = 0.0
-            for inputs, labels in self.train_loader:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
+            train_loss = 0.0
+            for input_batch, target_batch in self.train_loader:
                 self.optimizer.zero_grad()
-                outputs = self.model(inputs)
-                loss = self.criterion(outputs, labels)
-                mae = torch.abs(outputs - labels).mean()
+                loss = self.calc_loss_batch(
+                    input_batch, target_batch
+                )
                 loss.backward()
                 self.optimizer.step()
-                running_loss += loss.item() * inputs.size(0)
-                running_mae += mae.item() * inputs.size(0)
-            epoch_loss = running_loss / len(self.train_loader.dataset)
-            epoch_mae = running_mae / len(self.train_loader.dataset)
-            train_losses.append(epoch_loss)
-            train_maes.append(epoch_mae)
+                samples_seen += input_batch.shape[0]
+
+                train_loss += (loss.item() * input_batch.size(0))
+            train_loss = train_loss / len(self.train_loader)
+            train_losses.append(train_loss)   
             
             # Validation
             self.model.eval()
-            running_val_loss = 0.0
-            running_val_mae = 0.0
-            with torch.no_grad():
-                for inputs, labels in self.val_loader:
-                    inputs, labels = inputs.to(self.device), labels.to(self.device)
-                    outputs = self.model(inputs)
-                    loss = self.criterion(outputs, labels)
-                    mae = torch.abs(outputs - labels).mean()
-                    running_val_loss += loss.item() * inputs.size(0)
-                    running_val_mae += mae.item() * inputs.size(0)
-            epoch_val_loss = running_val_loss / len(self.val_loader.dataset)
-            epoch_val_mae = running_val_mae / len(self.val_loader.dataset)
-            val_losses.append(epoch_val_loss)
-            val_maes.append(epoch_val_mae)
-            if self.scheduler is not None:
-                self.scheduler.step(epoch_val_loss)
-            print(f"Epoch {epoch+1} | Train Loss: {epoch_loss:.4f} | Train MAE: {epoch_mae:.4f} | Val Loss: {epoch_val_loss:.4f} | Val MAE: {epoch_val_mae:.4f}")
+            val_loss = self.calc_loss_loader(self.val_loader)
+            val_losses.append(val_loss)
+
+            if isinstance(self.scheduler, ReduceLROnPlateau):
+                self.scheduler.step(val_loss)
+            else:
+                self.scheduler.step()
+                
+            print(f"Epoch {epoch+1}: "
+                  f"Train loss {train_loss:.3f}, "
+                  f"Val loss {val_loss:.3f}")
+
             # Early stopping
-            if epoch_val_mae < maes_max:
-                maes_max = epoch_val_mae
+            if val_loss < val_loss_max:
+                val_loss_max = val_loss
                 patience_counter = 0
             else:
                 patience_counter += 1
+
             if patience_counter >= patience:
-                print("Early stopping due to no improvement after {} epochs".format(patience))
+                print(f"Early stopping due to no improvement "
+                      f"after {patience} epochs")
                 break
 
-        return train_losses, train_maes, val_losses, val_maes
+        return train_losses, val_losses, samples_seen
+    
     
     def get_trained_model(self):
+        """
+        Return the trained model
+        """
         return self.model
-
-    # def evaluate(self):
-    #     self.model.eval()
-    #     total_accuracy = 0.0
-    #     total_samples = 0
-    #     with torch.no_grad():
-    #         for inputs, labels in self.test_loader:
-    #             inputs, labels = inputs.to(self.device), labels.to(self.device)
-    #             outputs = torch.sigmoid(self.model(inputs))
-    #             outputs_binary = (outputs >= 0.5).float()
-    #             # Ensure shapes match by squeezing/reshaping if needed
-    #             outputs_binary = outputs_binary.squeeze().cpu().numpy()
-    #             labels = labels.squeeze().cpu().numpy()
-    #             # Convert boolean comparison to float before taking mean
-    #             accuracy = np.mean(outputs_binary == labels)
-    #             total_accuracy += accuracy * inputs.size(0)
-    #             total_samples += inputs.size(0)
-    #     total_accuracy = total_accuracy / total_samples
-    #     print(f'Test Accuracy: {total_accuracy:.4f}')
-    #     return total_accuracy
-    
