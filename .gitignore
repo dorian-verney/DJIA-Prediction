@@ -3,5 +3,5 @@
 data/
 
 src/models/hybrid_system/
-
+notebook/
 *.arrow*
